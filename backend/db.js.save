@@ -1,0 +1,112 @@
+const path = require("path");
+const sqlite3 = require("sqlite3").verbose();
+
+const dbPath = path.join(__dirname, "game.db");
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error("SQLite baglanti hatasi:", err.message);
+    return;
+  }
+  console.log("SQLite baglantisi basarili.");
+});
+
+const initDb = () => {
+  db.serialize(() => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        wallet_tokens INTEGER DEFAULT 0,
+        lat REAL,
+        lng REAL,
+        last_active_at INTEGER,
+        last_location_at INTEGER
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS treasures (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lat REAL NOT NULL,
+        lng REAL NOT NULL,
+        type TEXT DEFAULT 'small',
+        value INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'active',
+        created_at INTEGER NOT NULL,
+        collected_by INTEGER,
+        collected_at INTEGER
+      )
+    `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        treasure_id INTEGER,
+        amount INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (treasure_id) REFERENCES treasures(id)
+      )
+    `);
+
+    db.run("CREATE INDEX IF NOT EXISTS idx_users_last_active ON users(last_active_at)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_treasures_status ON treasures(status)");
+    db.run(
+      "CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user_created ON wallet_transactions(user_id, created_at DESC)"
+    );
+
+    db.all("PRAGMA table_info(treasures)", [], (err, columns) => {
+      if (err) {
+        console.error("Treasure tablo kontrol hatasi:", err.message);
+        return;
+      }
+
+      const columnNames = new Set(columns.map((column) => column.name));
+
+      if (!columnNames.has("type")) {
+        db.run("ALTER TABLE treasures ADD COLUMN type TEXT DEFAULT 'small'");
+      }
+      if (!columnNames.has("value")) {
+        db.run("ALTER TABLE treasures ADD COLUMN value INTEGER DEFAULT 0");
+      }
+      if (!columnNames.has("status")) {
+        db.run("ALTER TABLE treasures ADD COLUMN status TEXT DEFAULT 'active'");
+      }
+      if (!columnNames.has("collected_by")) {
+        db.run("ALTER TABLE treasures ADD COLUMN collected_by INTEGER");
+      }
+      if (!columnNames.has("collected_at")) {
+        db.run("ALTER TABLE treasures ADD COLUMN collected_at INTEGER");
+      }
+      if (columnNames.has("is_active")) {
+        db.run(
+          "UPDATE treasures SET status = 'active' WHERE (status IS NULL OR status = '') AND is_active = 1"
+        );
+        db.run(
+          "UPDATE treasures SET status = 'collected' WHERE (status IS NULL OR status = '') AND is_active = 0"
+        );
+      } else {
+        db.run("UPDATE treasures SET status = 'active' WHERE status IS NULL OR status = ''");
+      }
+    });
+
+    db.all("PRAGMA table_info(users)", [], (err, columns) => {
+      if (err) {
+        console.error("Users tablo kontrol hatasi:", err.message);
+        return;
+      }
+
+      const columnNames = new Set(columns.map((column) => column.name));
+      if (!columnNames.has("last_location_at")) {
+        db.run("ALTER TABLE users ADD COLUMN last_location_at INTEGER");
+      }
+    });
+  });
+};
+
+module.exports = {
+  db,
+ 

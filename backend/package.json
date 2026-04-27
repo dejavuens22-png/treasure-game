@@ -1,0 +1,17 @@
+{
+  "name": "treasure-hunting-backend",
+  "version": "1.0.0",
+  "description": "Treasure hunting game backend with Express, sqlite3 and JWT",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.20.0",
+    "sqlite3": "^5.1.7"
+  }
+}
