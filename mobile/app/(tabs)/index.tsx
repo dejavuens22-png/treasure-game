@@ -14,7 +14,7 @@ import {
 import * as Location from "expo-location";
 import MapView, { Marker } from "react-native-maps";
 
-const BASE_URL = "http://192.168.0.21:3001";
+const BASE_URL = "https://treasure-game-backend.onrender.com";
 const TREASURE_COLLECT_DISTANCE_METERS = 50;
 const LOCATION_SEND_INTERVAL_MS = 3500;
 
@@ -94,10 +94,27 @@ async function api(path: string, options: RequestInit = {}, token?: string) {
     ...(options.headers as Record<string, string>),
   };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.message || "Istek basarisiz.");
-  return data;
+  try {
+    console.log("API REQUEST:", BASE_URL + path);
+  
+    const response = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers,
+    });
+  
+    const data = await response.json().catch(() => ({}));
+  
+    console.log("API RESPONSE:", data);
+  
+    if (!response.ok) {
+      throw new Error(data.message || "Istek basarisiz.");
+    }
+  
+    return data;
+  } catch (err) {
+    console.log("API ERROR:", err);
+    throw err;
+  }
 }
 
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;

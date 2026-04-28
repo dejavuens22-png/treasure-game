@@ -12,7 +12,8 @@ import {
   View,
 } from "react-native";
 
-const BASE_URL = "http://192.168.0.21:3001";
+const BASE_URL = "https://treasure-game-backend.onrender.com";
+
 
 const theme = {
   bg: "#06080F",
@@ -27,16 +28,27 @@ const theme = {
 };
 
 async function api(path, options = {}, token) {
-  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    throw new Error(data.message || "Istek basarisiz.");
+  try {
+    console.log("API REQUEST:", BASE_URL + path);
+  
+    const res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers,
+    });
+  
+    const data = await res.json().catch(() => ({}));
+  
+    console.log("API RESPONSE:", data);
+  
+    if (!res.ok) {
+      throw new Error(data.message || "Istek basarisiz.");
+    }
+  
+    return data;
+  } catch (err) {
+    console.log("API ERROR:", err);
+    throw err;
   }
-  return data;
 }
 
 function GameCard({ title, children, right }) {

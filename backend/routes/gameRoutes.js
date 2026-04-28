@@ -209,7 +209,8 @@ router.post("/treasure/collect", authMiddleware, async (req, res) => {
       `SELECT id, lat, lng, type, value
        FROM treasures
        WHERE status = 'active'
-       LIMIT 1`
+       LIMIT 1
+       FOR UPDATE`
     );
 
     const treasure = treasureResult.rows[0];
@@ -253,7 +254,10 @@ router.post("/treasure/collect", authMiddleware, async (req, res) => {
     }
 
     await client.query(
-      "UPDATE users SET wallet_tokens = wallet_tokens + $1 WHERE id = $2",
+      `UPDATE users 
+       SET wallet_tokens = wallet_tokens + $1 
+       WHERE id = $2
+       RETURNING wallet_tokens`,
       [treasure.value, userId]
     );
 
