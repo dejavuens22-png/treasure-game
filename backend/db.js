@@ -22,7 +22,22 @@ const initDb = async () => {
       last_location_at BIGINT
     );
   `);
-
+  await pool.query(`
+    ALTER TABLE users 
+    ADD COLUMN IF NOT EXISTS avatar_json JSONB
+  `);
+  await pool.query(`
+    ALTER TABLE users 
+    ADD COLUMN IF NOT EXISTS gender TEXT
+  `);
+  await pool.query(`
+    ALTER TABLE users 
+    ADD COLUMN IF NOT EXISTS selected_avatar TEXT
+  `);
+  await pool.query(`
+    ALTER TABLE users 
+    ADD COLUMN IF NOT EXISTS owned_avatars JSONB DEFAULT '[]'::jsonb
+  `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS treasures (
       id SERIAL PRIMARY KEY,

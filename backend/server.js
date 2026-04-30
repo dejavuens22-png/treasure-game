@@ -5,7 +5,7 @@ const authRoutes = require("./routes/authRoutes");
 const gameRoutes = require("./routes/gameRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 const leaderboardRoutes = require("./routes/leaderboardRoutes");
-
+const userRoutes = require("./routes/userRoutes");
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -21,7 +21,7 @@ app.use("/auth", authRoutes);
 app.use("/game", gameRoutes);
 app.use("/wallet", walletRoutes);
 app.use("/leaderboard", leaderboardRoutes);
-
+app.use("/user", userRoutes);
 app.listen(PORT, () => {
   console.log(`Server calisti: http://localhost:${PORT}`);
 });

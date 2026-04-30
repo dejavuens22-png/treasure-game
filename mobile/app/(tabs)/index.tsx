@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Modal,
+  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -62,6 +64,73 @@ type ShopDetectorItem = {
 };
 
 type TokenPack = { id: string; amount: number; priceText: string };
+
+type UserProfile = {
+  username: string;
+  wallet_tokens: number;
+  gender: string | null;
+  selected_avatar: string | null;
+  owned_avatars: string[];
+};
+
+type CatalogAvatar = {
+  id: string;
+  image: string;
+  price: number;
+  owned: boolean;
+  selected: boolean;
+};
+
+function normalizeNullableString(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s || s === "null" || s === "undefined") return null;
+  return s;
+}
+
+/** Statik require map (RN dinamik string kabul etmez) */
+const CHARACTER_IMAGES: Record<string, number> = {
+  male_01: require("../../assets/images/characters/male_01.png"),
+  male_02: require("../../assets/images/characters/male_02.png"),
+  male_03: require("../../assets/images/characters/male_03.png"),
+  male_04: require("../../assets/images/characters/male_04.png"),
+  male_05: require("../../assets/images/characters/male_05.png"),
+  male_06: require("../../assets/images/characters/male_06.png"),
+  male_07: require("../../assets/images/characters/male_07.png"),
+  male_08: require("../../assets/images/characters/male_08.png"),
+  male_09: require("../../assets/images/characters/male_09.png"),
+  male_10: require("../../assets/images/characters/male_10.png"),
+  female_01: require("../../assets/images/characters/female_01.png"),
+  female_02: require("../../assets/images/characters/female_02.png"),
+  female_03: require("../../assets/images/characters/female_03.png"),
+  female_04: require("../../assets/images/characters/female_04.png"),
+  female_05: require("../../assets/images/characters/female_05.png"),
+  female_06: require("../../assets/images/characters/female_06.png"),
+  female_07: require("../../assets/images/characters/female_07.png"),
+  female_08: require("../../assets/images/characters/female_08.png"),
+  female_09: require("../../assets/images/characters/female_09.png"),
+  female_10: require("../../assets/images/characters/female_10.png"),
+};
+
+/** Kart çerçeve renkleri (1–10) */
+function avatarSlotFromId(id: string): number {
+  const m = id.match(/^(?:male|female)_(\d{1,2})$/);
+  const n = m ? parseInt(m[1], 10) : 1;
+  return Math.min(10, Math.max(1, n));
+}
+
+const AVATAR_FRAME_STYLES = [
+  { borderColor: "#94a3b8", shadowColor: "#64748b", bg: "rgba(148, 163, 184, 0.12)" },
+  { borderColor: "#3b82f6", shadowColor: "#2563eb", bg: "rgba(59, 130, 246, 0.12)" },
+  { borderColor: "#22c55e", shadowColor: "#16a34a", bg: "rgba(34, 197, 94, 0.12)" },
+  { borderColor: "#a855f7", shadowColor: "#9333ea", bg: "rgba(168, 85, 247, 0.12)" },
+  { borderColor: "#eab308", shadowColor: "#ca8a04", bg: "rgba(234, 179, 8, 0.15)" },
+  { borderColor: "#ef4444", shadowColor: "#dc2626", bg: "rgba(239, 68, 68, 0.12)" },
+  { borderColor: "#2dd4bf", shadowColor: "#14b8a6", bg: "rgba(45, 212, 191, 0.12)" },
+  { borderColor: "#7dd3fc", shadowColor: "#38bdf8", bg: "rgba(125, 211, 252, 0.12)" },
+  { borderColor: "#fb923c", shadowColor: "#ea580c", bg: "rgba(251, 146, 60, 0.12)" },
+  { borderColor: "#c084fc", shadowColor: "#f59e0b", bg: "rgba(192, 132, 252, 0.18)" },
+];
 
 const shopDetectors: ShopDetectorItem[] = [
   { id: "mini", name: "Mini Dedektör", icon: "📡", price: 100, range: "Kisa", digSpeed: "Yavas", description: "Baslangic icin hafif ve pratik." },
@@ -143,17 +212,23 @@ export default function HomeScreen() {
   const [message, setMessage] = useState("");
   const [spawnInfo, setSpawnInfo] = useState<SpawnInfo | null>(null);
   const [treasure, setTreasure] = useState<Treasure | null>(null);
-  const [wallet, setWallet] = useState<{ wallet_tokens?: number; walletTokens?: number } | null>(
+  const [wallet, setWallet] = useState<{ wallet_tokens?: number; walletTokens?: number; tokens?: number } | null>(
     null
   );
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [needGenderModal, setNeedGenderModal] = useState(false);
+  const [forceGenderScreen, setForceGenderScreen] = useState(false);
+  const [avatarCatalog, setAvatarCatalog] = useState<CatalogAvatar[]>([]);
+  const [previewAvatarId, setPreviewAvatarId] = useState<string | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationPermissionState, setLocationPermissionState] = useState<
     "idle" | "granted" | "denied" | "error"
   >("idle");
   const [locationError, setLocationError] = useState("");
-  const [showWalletPanel, setShowWalletPanel] = useState(false);
   const [showTreasurePanel, setShowTreasurePanel] = useState(false);
-  const [activeTab, setActiveTab] = useState<"home" | "maps" | "shop">("maps");
+  const [activeTab, setActiveTab] = useState<"home" | "maps" | "shop" | "avatars">("maps");
   const [friendHandle, setFriendHandle] = useState("");
   const [friends, setFriends] = useState<string[]>(["Nova", "Kaan", "Luna"]);
   const [ownedDetectors] = useState<DetectorItem[]>([
@@ -173,6 +248,58 @@ export default function HomeScreen() {
   }, [location, treasure]);
   const canCollectTreasure =
     typeof treasureDistance === "number" && treasureDistance <= TREASURE_COLLECT_DISTANCE_METERS;
+
+  const refreshProfile = async (authToken?: string): Promise<UserProfile> => {
+    const t = (authToken ?? token)?.trim?.() ?? "";
+    if (!t) {
+      throw new Error("Profil için oturum yok.");
+    }
+    const p = await api("/user/profile", {}, t);
+    const ownedRaw = (p as { owned_avatars?: unknown }).owned_avatars;
+    const nextProfile: UserProfile = {
+      username: (p as { username: string }).username,
+      wallet_tokens: (p as { wallet_tokens?: number }).wallet_tokens ?? 0,
+      gender: normalizeNullableString((p as { gender?: unknown }).gender),
+      selected_avatar: normalizeNullableString((p as { selected_avatar?: unknown }).selected_avatar),
+      owned_avatars: Array.isArray(ownedRaw) ? (ownedRaw as string[]) : [],
+    };
+    setUserProfile(nextProfile);
+    const tok = nextProfile.wallet_tokens;
+    setWallet({ wallet_tokens: tok, tokens: tok });
+    return nextProfile;
+  };
+
+  const fetchAvatars = async (authToken?: string) => {
+    const t = (authToken ?? token)?.trim?.() ?? "";
+    if (!t) return;
+    try {
+      const data = await api("/user/avatars", {}, t);
+      setAvatarCatalog(Array.isArray(data.avatars) ? data.avatars : []);
+    } catch {
+      setAvatarCatalog([]);
+    }
+  };
+
+  const chooseGender = async (gender: "male" | "female") => {
+    const t = token?.trim?.() ?? "";
+    if (!t) {
+      Alert.alert("Hata", "Oturum bulunamadi.");
+      return;
+    }
+    setAvatarBusy(true);
+    try {
+      await api("/user/gender", { method: "POST", body: JSON.stringify({ gender }) }, t);
+      setForceGenderScreen(false);
+      setNeedGenderModal(false);
+      await refreshProfile(t);
+      await fetchAvatars(t);
+      setMessage("");
+    } catch (error: any) {
+      Alert.alert("Hata", error.message || "Cinsiyet kaydedilemedi.");
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
 
   const updateSpawnMessage = (spawn?: SpawnInfo) => {
     if (!spawn) return;
@@ -220,8 +347,14 @@ export default function HomeScreen() {
           method: "POST",
           body: JSON.stringify({ username: username.trim(), password }),
         });
-        setToken(loginData.token);
+        const jwt = loginData.token as string;
+        setToken(jwt);
         setMessage("Operasyon basarili. Oyuna hos geldin.");
+        try {
+          await refreshProfile(jwt);
+        } catch (e: any) {
+          setMessage(e?.message || "Profil alinamadi. Tekrar giris yapmayi dene.");
+        }
       }
     } catch (error: any) {
       setMessage(error.message || "Islem basarisiz.");
@@ -297,6 +430,11 @@ export default function HomeScreen() {
       setTreasure(null);
       setShowTreasurePanel(false);
       await fetchWallet(true);
+      try {
+        await refreshProfile();
+      } catch {
+        /* noop */
+      }
     } catch (error: any) {
       setMessage(error.message || "Collect basarisiz.");
     } finally {
@@ -308,8 +446,11 @@ export default function HomeScreen() {
     if (!silent) setLoading(true);
     try {
       const walletData = await api("/wallet", {}, token);
-      setWallet(walletData);
-      if (!silent) setShowWalletPanel(true);
+      const tok = (walletData as { tokens?: number; wallet_tokens?: number }).tokens ??
+        (walletData as { wallet_tokens?: number }).wallet_tokens ??
+        0;
+      setWallet({ ...walletData, wallet_tokens: tok, tokens: tok });
+      setUserProfile((prev) => (prev ? { ...prev, wallet_tokens: tok } : prev));
     } catch (error: any) {
       setMessage(error.message || "Wallet cekilemedi.");
     } finally {
@@ -338,69 +479,242 @@ export default function HomeScreen() {
     showComingSoon("Arkadas sistemi yakinda aktif olacak.");
   };
 
+  const handleAvatarBuy = async (avatarId: string) => {
+    await api("/user/avatars/buy", { method: "POST", body: JSON.stringify({ avatarId }) }, token);
+    await refreshProfile();
+    await fetchAvatars();
+  };
+
+  const handleAvatarSelect = async (avatarId: string) => {
+    await api("/user/avatars/select", { method: "POST", body: JSON.stringify({ avatarId }) }, token);
+    await refreshProfile();
+    await fetchAvatars();
+  };
+
+  const onAvatarPrimaryPress = async (item: CatalogAvatar) => {
+    if (item.selected || avatarBusy) return;
+    setAvatarBusy(true);
+    try {
+      if (item.owned) {
+        await handleAvatarSelect(item.id);
+        return;
+      }
+      const bal =
+        userProfile?.wallet_tokens ?? wallet?.wallet_tokens ?? wallet?.tokens ?? 0;
+      if (item.price > 0 && bal < item.price) {
+        Alert.alert("Yetersiz token", "Yeterli token yok.");
+        return;
+      }
+      await handleAvatarBuy(item.id);
+    } catch (error: any) {
+      const msg = error.message || "Islem basarisiz.";
+      if (msg.includes("token") || msg.includes("Token")) {
+        Alert.alert("Yetersiz token", "Yeterli token yok.");
+      } else {
+        Alert.alert("Hata", msg);
+      }
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setNeedGenderModal(false);
+      setForceGenderScreen(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        await refreshProfile(token);
+      } catch (e: any) {
+        if (!cancelled) setMessage(e?.message || "Profil yuklenemedi.");
+      }
+    })();
     startLocationTracking();
     checkTreasure();
-    fetchWallet(true);
     return () => {
+      cancelled = true;
       watchSubscriptionRef.current?.remove();
       watchSubscriptionRef.current = null;
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- run bootstrap when JWT appears
   }, [token]);
 
-  if (!token) {
-    return (
-      <SafeAreaView style={styles.authSafe}>
-        <View style={styles.authPanel}>
-          <Text style={styles.brand}>TREASURE HUNT</Text>
-          <Text style={styles.subBrand}>Night Raid Protocol</Text>
+  useEffect(() => {
+    if (!token || normalizeNullableString(userProfile?.gender) == null) return;
+    if (activeTab !== "avatars") return;
+    fetchAvatars();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- defer catalog until tab + gender
+  }, [token, userProfile?.gender, activeTab]);
 
-          <View style={styles.authCard}>
-            <Text style={styles.authTitle}>{mode === "login" ? "Login" : "Register"}</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Username"
-              placeholderTextColor={theme.muted}
-              autoCapitalize="none"
-              value={username}
-              onChangeText={setUsername}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              placeholderTextColor={theme.muted}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-            />
-            <TouchableOpacity style={styles.primaryButton} onPress={authenticate} disabled={loading}>
-              {loading ? (
-                <ActivityIndicator color="#042530" />
+  useEffect(() => {
+    if (!token) {
+      setForceGenderScreen(false);
+      setNeedGenderModal(false);
+      return;
+    }
+
+    const gender = userProfile?.gender;
+    const hasGender = gender === "male" || gender === "female";
+
+    console.log("GENDER WATCH:", gender, "HAS:", hasGender);
+    console.log("PROFILE GENDER (state):", userProfile?.gender ?? null);
+    console.log("FORCE GENDER SCREEN (next):", !hasGender);
+
+    if (!hasGender) {
+      setForceGenderScreen(true);
+      setNeedGenderModal(true);
+    } else {
+      setForceGenderScreen(false);
+      setNeedGenderModal(false);
+    }
+  }, [token, userProfile?.gender]);
+
+  const walletBalance =
+    userProfile?.wallet_tokens ??
+    wallet?.wallet_tokens ??
+    wallet?.tokens ??
+    wallet?.walletTokens ??
+    0;
+
+  const selectedCharacterSource = userProfile?.selected_avatar
+    ? CHARACTER_IMAGES[userProfile.selected_avatar]
+    : null;
+
+  const catalogRows: CatalogAvatar[][] = [];
+  for (let i = 0; i < avatarCatalog.length; i += 2) {
+    catalogRows.push(avatarCatalog.slice(i, i + 2));
+  }
+
+  const avatarActionLabel = (item: CatalogAvatar) => {
+    if (item.selected) return "Seçili";
+    if (item.owned) return "Seç";
+    if (item.price === 0) return "Ücretsiz";
+    return "Satın Al";
+  };
+
+  const previewSlot = previewAvatarId ? avatarSlotFromId(previewAvatarId) : 1;
+  const previewFrameStyle = AVATAR_FRAME_STYLES[previewSlot - 1];
+
+  const displayUsername = userProfile?.username?.trim() || username.trim() || "Oyuncu";
+
+  return (
+    <View style={{ flex: 1 }}>
+      <Modal
+        visible={Boolean(token && needGenderModal && !forceGenderScreen)}
+        animationType="fade"
+        transparent={false}
+        presentationStyle="fullScreen"
+        onRequestClose={() => {}}
+      >
+        <SafeAreaView style={styles.genderModalSafe}>
+          <View style={styles.genderModalRoot}>
+            <Text style={styles.genderModalTitle}>Cinsiyetini seç</Text>
+            <Text style={styles.genderModalSub}>Bir kez kaydedilir; karakter mağazası buna göre listelenir.</Text>
+            <TouchableOpacity
+              style={[styles.genderPickButton, styles.genderPickFemale]}
+              disabled={avatarBusy}
+              onPress={() => chooseGender("female")}
+              activeOpacity={0.88}
+            >
+              {avatarBusy ? (
+                <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.primaryButtonText}>{mode.toUpperCase()}</Text>
+                <Text style={styles.genderPickButtonText}>Kadın</Text>
               )}
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => setMode(mode === "login" ? "register" : "login")}
+              style={[styles.genderPickButton, styles.genderPickMale]}
+              disabled={avatarBusy}
+              onPress={() => chooseGender("male")}
+              activeOpacity={0.88}
             >
-              <Text style={styles.secondaryButtonText}>
-                {mode === "login" ? "Hesabin yok mu? Register" : "Hesabin var mi? Login"}
-              </Text>
+              {avatarBusy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.genderPickButtonText}>Erkek</Text>
+              )}
             </TouchableOpacity>
           </View>
+        </SafeAreaView>
+      </Modal>
 
-          {message ? <Text style={styles.footerMessage}>{message}</Text> : null}
-        </View>
-      </SafeAreaView>
-    );
-  }
+      <Modal
+        visible={Boolean(token && previewAvatarId)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewAvatarId(null)}
+      >
+        <Pressable style={styles.avatarPreviewBackdrop} onPress={() => setPreviewAvatarId(null)}>
+          {previewAvatarId && CHARACTER_IMAGES[previewAvatarId] ? (
+            <View
+              style={[
+                styles.avatarPreviewFrame,
+                {
+                  borderColor: previewFrameStyle.borderColor,
+                  backgroundColor: previewFrameStyle.bg,
+                  shadowColor: previewFrameStyle.shadowColor,
+                },
+              ]}
+            >
+              <Image
+                source={CHARACTER_IMAGES[previewAvatarId]}
+                style={styles.avatarPreviewImage}
+                resizeMode="contain"
+              />
+            </View>
+          ) : null}
+        </Pressable>
+      </Modal>
 
-  const walletBalance = wallet?.wallet_tokens ?? wallet?.walletTokens ?? 0;
+      {!token ? (
+        <SafeAreaView style={styles.authSafe}>
+          <View style={styles.authPanel}>
+            <Text style={styles.brand}>TREASURE HUNT</Text>
+            <Text style={styles.subBrand}>Night Raid Protocol</Text>
 
-  return (
-    <SafeAreaView style={styles.safe}>
+            <View style={styles.authCard}>
+              <Text style={styles.authTitle}>{mode === "login" ? "Login" : "Register"}</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Username"
+                placeholderTextColor={theme.muted}
+                autoCapitalize="none"
+                value={username}
+                onChangeText={setUsername}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Password"
+                placeholderTextColor={theme.muted}
+                secureTextEntry
+                value={password}
+                onChangeText={setPassword}
+              />
+              <TouchableOpacity style={styles.primaryButton} onPress={authenticate} disabled={loading}>
+                {loading ? (
+                  <ActivityIndicator color="#042530" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>{mode.toUpperCase()}</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => setMode(mode === "login" ? "register" : "login")}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {mode === "login" ? "Hesabin yok mu? Register" : "Hesabin var mi? Login"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {message ? <Text style={styles.footerMessage}>{message}</Text> : null}
+          </View>
+        </SafeAreaView>
+      ) : (
+        <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
         {activeTab === "home" ? (
           <ScrollView
@@ -409,7 +723,32 @@ export default function HomeScreen() {
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.heroCard}>
-              <Text style={styles.heroTitle}>Oyuncu Paneli</Text>
+              <View style={styles.heroNameRow}>
+                <View style={styles.heroProfileThumb}>
+                  {selectedCharacterSource ? (
+                    <Image
+                      source={selectedCharacterSource}
+                      style={styles.heroProfileThumbImage}
+                      resizeMode="contain"
+                    />
+                  ) : (
+                    <Text style={styles.heroProfileThumbEmoji}>🧑‍🚀</Text>
+                  )}
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.heroUserName} numberOfLines={1}>
+                    {displayUsername}
+                  </Text>
+                  <Text style={styles.heroPanelSubtitle}>Oyuncu Paneli</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.heroAvatarCta}
+                onPress={() => setActiveTab("avatars")}
+                activeOpacity={0.88}
+              >
+                <Text style={styles.heroAvatarCtaText}>Avatarları aç</Text>
+              </TouchableOpacity>
               <View style={styles.heroRow}>
                 <View style={styles.heroPill}>
                   <Text style={styles.heroPillLabel}>Token</Text>
@@ -420,19 +759,20 @@ export default function HomeScreen() {
                   <Text style={styles.heroPillValue}>{playerStatus}</Text>
                 </View>
               </View>
-              <Text style={styles.heroSub}>
-                Profil: <Text style={styles.heroSubStrong}>{username || "Oyuncu"}</Text>
-              </Text>
             </View>
 
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Oyuncu Profili</Text>
               <View style={styles.profileRow}>
                 <View style={styles.avatarCircle}>
-                  <Text style={styles.avatarEmoji}>🧍‍♂️</Text>
+                  {selectedCharacterSource ? (
+                    <Image source={selectedCharacterSource} style={styles.avatarCircleImage} resizeMode="contain" />
+                  ) : (
+                    <Text style={styles.avatarEmoji}>🧍‍♂️</Text>
+                  )}
                 </View>
                 <View style={{ flex: 1, gap: 4 }}>
-                  <Text style={styles.profileName}>{username || "Oyuncu"}</Text>
+                  <Text style={styles.profileName}>{displayUsername}</Text>
                   <Text style={styles.profileMeta}>
                     Konum: {location ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}` : "Bekleniyor"}
                   </Text>
@@ -529,7 +869,11 @@ export default function HomeScreen() {
                 >
                   <View style={styles.playerMarkerGlow}>
                     <View style={styles.playerMarkerBody}>
-                      <Text style={styles.playerEmoji}>🧍‍♂️</Text>
+                      {selectedCharacterSource ? (
+                        <Image source={selectedCharacterSource} style={styles.markerAvatarImage} resizeMode="contain" />
+                      ) : (
+                        <Text style={styles.playerEmoji}>🧍‍♂️</Text>
+                      )}
                     </View>
                   </View>
                 </Marker>
@@ -709,6 +1053,86 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
+        {activeTab === "avatars" ? (
+          <View style={styles.shopScreenWrap}>
+            <ScrollView
+              style={styles.screenScroll}
+              contentContainerStyle={styles.shopScrollContentBig}
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.shopListTitle}>Karakter Avatarları</Text>
+              <Text style={styles.shopListHint}>
+                Görsele dokun ön izle • Aşağıdaki aksiyonla seç veya satın al • 🪙 {walletBalance}
+              </Text>
+              {normalizeNullableString(userProfile?.gender) == null ? (
+                <Text style={styles.avatarWaitGender}>Önce cinsiyet seçimi tamamlanmalı.</Text>
+              ) : (
+                <View style={styles.avatarGrid}>
+                  {catalogRows.map((row, ri) => (
+                    <View key={`row-${ri}`} style={styles.avatarGridRow}>
+                      {row.map((item) => {
+                        const slot = avatarSlotFromId(item.id);
+                        const frame = AVATAR_FRAME_STYLES[slot - 1];
+                        return (
+                          <View
+                            key={item.id}
+                            style={[
+                              styles.avatarCard,
+                              {
+                                borderColor: frame.borderColor,
+                                backgroundColor: frame.bg,
+                                shadowColor: frame.shadowColor,
+                              },
+                            ]}
+                          >
+                            <TouchableOpacity
+                              activeOpacity={0.9}
+                              onPress={() => setPreviewAvatarId(item.id)}
+                              style={styles.avatarCardImageTap}
+                            >
+                              <Image
+                                source={CHARACTER_IMAGES[item.id]}
+                                style={styles.avatarCardImage}
+                                resizeMode="contain"
+                              />
+                            </TouchableOpacity>
+                            <Text style={styles.avatarCardId}>{item.id}</Text>
+                            <View style={styles.avatarCardMetaRow}>
+                              {item.price === 0 ? (
+                                <Text style={styles.avatarFreeText}>Ücretsiz</Text>
+                              ) : (
+                                <Text style={styles.avatarPriceText}>
+                                  {!item.owned ? `${item.price} token` : "Satın alındı"}
+                                </Text>
+                              )}
+                            </View>
+                            <TouchableOpacity
+                              style={[styles.avatarCardAction, item.selected && styles.avatarCardActionDisabled]}
+                              disabled={item.selected || avatarBusy}
+                              onPress={() => onAvatarPrimaryPress(item)}
+                              activeOpacity={0.85}
+                            >
+                              <Text
+                                style={[
+                                  styles.avatarCardActionText,
+                                  item.selected && { color: theme.gold },
+                                ]}
+                              >
+                                {avatarActionLabel(item)}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })}
+                      {row.length === 1 ? <View style={styles.avatarGridCellPlaceholder} /> : null}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        ) : null}
+
         {message ? <Text style={styles.liveMessage}>{message}</Text> : null}
 
         <View style={styles.gameTabBar}>
@@ -736,9 +1160,64 @@ export default function HomeScreen() {
             <Text style={[styles.gameTabIcon, activeTab === "shop" && styles.gameTabIconActive]}>🛒</Text>
             <Text style={[styles.gameTabLabel, activeTab === "shop" && styles.gameTabLabelActive]}>Shop</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.gameTab, activeTab === "avatars" && styles.gameTabActive]}
+            onPress={() => setActiveTab("avatars")}
+            activeOpacity={0.88}
+          >
+            <Text style={[styles.gameTabIcon, activeTab === "avatars" && styles.gameTabIconActive]}>🧑‍🎤</Text>
+            <Text style={[styles.gameTabLabel, activeTab === "avatars" && styles.gameTabLabelActive]}>Avatarlar</Text>
+          </TouchableOpacity>
         </View>
       </View>
-    </SafeAreaView>
+        </SafeAreaView>
+      )}
+
+      {token && forceGenderScreen ? (
+        <View
+          pointerEvents="auto"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "#10233f",
+            zIndex: 99999,
+            elevation: 99999,
+            flexDirection: "row",
+          }}
+        >
+          <TouchableOpacity
+            disabled={avatarBusy}
+            onPress={() => chooseGender("male")}
+            style={{
+              flex: 1,
+              justifyContent: "center",
+              alignItems: "center",
+              borderRightWidth: 1,
+              borderRightColor: "rgba(255,255,255,0.25)",
+            }}
+            activeOpacity={0.85}
+          >
+            <Text style={{ color: "#fff", fontSize: 46, fontWeight: "900" }}>MALE</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            disabled={avatarBusy}
+            onPress={() => chooseGender("female")}
+            style={{
+              flex: 1,
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+            activeOpacity={0.85}
+          >
+            <Text style={{ color: "#fff", fontSize: 46, fontWeight: "900" }}>FEMALE</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -779,6 +1258,22 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 9,
   },
+  heroNameRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
+  heroProfileThumb: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "rgba(17, 35, 63, 0.95)",
+    borderWidth: 1,
+    borderColor: "#8BFBFF",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroProfileThumbImage: { width: 42, height: 42 },
+  heroProfileThumbEmoji: { fontSize: 20 },
+  heroUserName: { color: theme.gold, fontWeight: "900", fontSize: 18 },
+  heroPanelSubtitle: { color: theme.muted, fontWeight: "700", fontSize: 12, marginTop: 2 },
   heroTitle: { color: theme.gold, fontWeight: "900", fontSize: 18, marginBottom: 10 },
   heroRow: { flexDirection: "row", gap: 10 },
   heroPill: {
@@ -801,6 +1296,17 @@ const styles = StyleSheet.create({
   heroPillValue: { color: theme.text, fontSize: 18, fontWeight: "900", marginTop: 4 },
   heroSub: { color: "#C7D7F7", marginTop: 10, fontWeight: "700" },
   heroSubStrong: { color: theme.neon, fontWeight: "900" },
+  heroAvatarCta: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(36, 62, 108, 0.85)",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(86, 230, 255, 0.55)",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  heroAvatarCtaText: { color: theme.text, fontWeight: "800", fontSize: 14 },
   sectionCard: {
     borderRadius: 18,
     borderWidth: 1,
@@ -812,15 +1318,17 @@ const styles = StyleSheet.create({
   sectionHint: { color: "#C7D7F7", marginTop: 4, fontSize: 12, fontWeight: "700" },
   profileRow: { flexDirection: "row", gap: 12, marginTop: 12, alignItems: "center" },
   avatarCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     borderWidth: 1,
     borderColor: "#8BFBFF",
     backgroundColor: "rgba(17, 35, 63, 0.9)",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
+  avatarCircleImage: { width: 42, height: 42 },
   avatarEmoji: { fontSize: 22 },
   profileName: { color: theme.gold, fontWeight: "900", fontSize: 16 },
   profileMeta: { color: "#C7D7F7", fontWeight: "700", fontSize: 12 },
@@ -887,6 +1395,91 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   inventoryEquipText: { color: theme.gold, fontWeight: "900", fontSize: 12 },
+  genderModalSafe: { flex: 1, backgroundColor: theme.bg },
+  genderModalRoot: {
+    flex: 1,
+    backgroundColor: theme.bg,
+    paddingHorizontal: 22,
+    paddingTop: 24,
+    gap: 18,
+  },
+  genderModalTitle: { color: theme.gold, fontSize: 26, fontWeight: "900", textAlign: "center" },
+  genderModalSub: { color: theme.muted, fontSize: 14, fontWeight: "700", textAlign: "center", lineHeight: 20 },
+  genderPickButton: {
+    borderRadius: 18,
+    paddingVertical: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 10,
+  },
+  genderPickFemale: { backgroundColor: "#be185d", borderWidth: 1, borderColor: "#fbcfe8" },
+  genderPickMale: { backgroundColor: "#0369a1", borderWidth: 1, borderColor: "#bae6fd" },
+  genderPickButtonText: { color: "#fff", fontSize: 18, fontWeight: "900" },
+  avatarPreviewBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(8, 14, 26, 0.92)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  avatarPreviewFrame: {
+    width: "88%",
+    maxWidth: 340,
+    aspectRatio: 0.62,
+    borderRadius: 26,
+    borderWidth: 4,
+    padding: 10,
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.55,
+    shadowRadius: 28,
+    elevation: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarPreviewImage: { width: "100%", height: "100%", flex: 1 },
+  avatarWaitGender: { color: theme.muted, marginTop: 14, fontWeight: "700", textAlign: "center" },
+  avatarGrid: { marginTop: 14, gap: 12 },
+  avatarGridRow: { flexDirection: "row", justifyContent: "space-between", gap: 10 },
+  avatarGridCellPlaceholder: { flex: 1, minHeight: 1 },
+  avatarCard: {
+    flex: 1,
+    borderRadius: 18,
+    borderWidth: 2,
+    padding: 10,
+    marginBottom: 2,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  avatarCardImageTap: {
+    borderRadius: 14,
+    backgroundColor: "rgba(10, 22, 44, 0.65)",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    height: 148,
+  },
+  avatarCardImage: { width: "100%", height: "100%", maxHeight: 148 },
+  avatarCardId: { color: "#C7D7F7", fontSize: 11, fontWeight: "800", marginTop: 6, textAlign: "center" },
+  avatarCardMetaRow: { flexDirection: "row", justifyContent: "center", marginTop: 4, minHeight: 20 },
+  avatarFreeText: { color: theme.success, fontWeight: "900", fontSize: 13 },
+  avatarPriceText: { color: theme.gold, fontWeight: "900", fontSize: 13 },
+  avatarCardAction: {
+    marginTop: 10,
+    borderRadius: 12,
+    paddingVertical: 11,
+    alignItems: "center",
+    backgroundColor: theme.neon,
+    borderWidth: 1,
+    borderColor: "#A3F2FF",
+  },
+  avatarCardActionDisabled: {
+    backgroundColor: "rgba(56, 86, 130, 0.85)",
+    borderColor: "#587BB8",
+    opacity: 0.85,
+  },
+  avatarCardActionText: { color: "#0A2A37", fontWeight: "900", fontSize: 13 },
   shopScreenWrap: { flex: 1 },
   tokenBuyCard: {
     borderRadius: 18,
@@ -1195,9 +1788,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   playerMarkerGlow: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 56,
+    height: 66,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(86, 230, 255, 0.28)",
@@ -1205,15 +1798,17 @@ const styles = StyleSheet.create({
     borderColor: "rgba(86, 230, 255, 0.95)",
   },
   playerMarkerBody: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 48,
+    height: 62,
+    borderRadius: 12,
     backgroundColor: "rgba(17, 35, 63, 0.9)",
     borderWidth: 1.5,
     borderColor: "#8BFBFF",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
+  markerAvatarImage: { width: 46, height: 58 },
   playerEmoji: { fontSize: 18 },
   treasureMarker: {
     width: 44,
