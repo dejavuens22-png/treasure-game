@@ -49,7 +49,7 @@ router.post("/login", async (req, res) => {
 
   try {
     const result = await db.query(
-      "SELECT id, username, password_hash, wallet_tokens FROM users WHERE username = $1",
+      "SELECT id, username, password_hash, wallet_tokens, is_banned FROM users WHERE username = $1",
       [username]
     );
 
@@ -64,6 +64,12 @@ router.post("/login", async (req, res) => {
     if (!isMatch) {
       return res.status(401).json({ message: "Kullanici adi veya sifre hatali." });
     }
+    if (user.is_banned) {
+      return res.status(403).json({ message: "Hesabin banli oldugu icin giris yapamazsin." });
+    }
+
+    const now = Date.now();
+    await db.query("UPDATE users SET last_login_at = $1 WHERE id = $2", [now, user.id]);
 
     const token = jwt.sign(
       { userId: user.id, username: user.username },
@@ -78,6 +84,24 @@ router.post("/login", async (req, res) => {
   } catch (err) {
     console.error("[/auth/login] error:", err);
     return res.status(500).json({ message: "Giris sirasinda hata olustu." });
+  }
+});
+
+router.post("/logout", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.json({ message: "Cikis tamamlandi." });
+    }
+    const token = authHeader.split(" ")[1];
+    const payload = jwt.verify(token, JWT_SECRET);
+    const userId = payload?.userId ?? payload?.id;
+    if (userId) {
+      await db.query("UPDATE users SET last_logout_at = $1 WHERE id = $2", [Date.now(), userId]);
+    }
+    return res.json({ message: "Cikis tamamlandi." });
+  } catch (_err) {
+    return res.json({ message: "Cikis tamamlandi." });
   }
 });
 
