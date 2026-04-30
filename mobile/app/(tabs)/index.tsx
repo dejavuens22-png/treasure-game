@@ -171,7 +171,15 @@ async function api(path: string, options: RequestInit = {}, token?: string) {
       headers,
     });
   
-    const data = await response.json().catch(() => ({}));
+    const rawText = await response.text();
+    let data: any = {};
+    if (rawText) {
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        data = { message: rawText };
+      }
+    }
   
     console.log("API RESPONSE:", data);
   
@@ -426,7 +434,9 @@ export default function HomeScreen() {
     setMessage("");
     try {
       const collectData = await api("/game/treasure/collect", { method: "POST" }, token);
-      setMessage(`${collectData.message} (+${collectData.reward} token)`);
+      const rewardText =
+        typeof collectData.reward === "number" ? ` (+${collectData.reward} token)` : "";
+      setMessage(`${collectData.message || "Collect tamamlandi."}${rewardText}`);
       setTreasure(null);
       setShowTreasurePanel(false);
       await fetchWallet(true);

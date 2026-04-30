@@ -7,10 +7,20 @@ const { generateTreasureReward } = require("../utils/treasure");
 const router = express.Router();
 
 const ACTIVE_WINDOW_MS = 60 * 1000;
-const MIN_LOCATION_INTERVAL_MS = 3000;
-const MAX_SPEED_KMH = 120;
-const COLLECT_DISTANCE_METERS = 15;
+const TREASURE_SPAWN_COOLDOWN_MS = 30 * 1000;
+const COLLECT_DISTANCE_METERS = 40;
 const TREASURE_SPAWN_DISTANCE_METERS = 1;
+const RATE_LIMIT_LOCATION_MS = 3000;
+const RATE_LIMIT_COLLECT_MS = 5000;
+const FAST_JUMP_WINDOW_MS = 3000;
+const FAST_JUMP_DISTANCE_METERS = 100;
+const LONG_JUMP_WINDOW_MS = 10000;
+const LONG_JUMP_DISTANCE_METERS = 500;
+const SUSPICIOUS_SPEED_KMH = 80;
+
+let lastSpawnAttemptAt = 0;
+const lastLocationRequestByUser = new Map();
+const lastCollectRequestByUser = new Map();
 
 const isValidCoordinates = (lat, lng) =>
   Number.isFinite(lat) &&
@@ -21,6 +31,30 @@ const isValidCoordinates = (lat, lng) =>
   lng <= 180;
 
 const getAuthUserId = (req) => req.user?.userId ?? req.user?.id;
+
+const nowMs = () => Date.now();
+
+const tryConsumeUserRateLimit = (store, userId, intervalMs) => {
+  const now = nowMs();
+  const last = store.get(userId) ?? 0;
+  if (now - last < intervalMs) {
+    return false;
+  }
+  store.set(userId, now);
+  return true;
+};
+
+const logSuspiciousEvent = async (userId, type, message, metadata = {}) => {
+  try {
+    await db.query(
+      `INSERT INTO suspicious_events (user_id, type, message, metadata, created_at)
+       VALUES ($1, $2, $3, $4::jsonb, $5)`,
+      [userId ?? null, type, message, JSON.stringify(metadata), nowMs()]
+    );
+  } catch (err) {
+    console.error("[suspicious_events] log error:", err);
+  }
+};
 
 const offsetByMeters = (lat, lng, meters) => {
   const angle = Math.random() * 2 * Math.PI;
@@ -43,8 +77,16 @@ const maybeSpawnTreasure = async (preferredUserId) => {
   );
 
   if (existing.rows.length > 0) {
+    console.log("[spawn] reason=active_treasure_exists");
     return { spawned: false, reason: "active_treasure_exists" };
   }
+
+  if (now - lastSpawnAttemptAt < TREASURE_SPAWN_COOLDOWN_MS) {
+    console.log("[spawn] reason=cooldown");
+    return { spawned: false, reason: "cooldown" };
+  }
+
+  lastSpawnAttemptAt = now;
 
   const activeUsersResult = await db.query(
     "SELECT id, lat, lng FROM users WHERE last_active_at >= $1 AND lat IS NOT NULL AND lng IS NOT NULL",
@@ -54,6 +96,7 @@ const maybeSpawnTreasure = async (preferredUserId) => {
   const activeUsers = activeUsersResult.rows;
 
   if (activeUsers.length < 2) {
+    console.log("[spawn] reason=not_enough_active_players");
     return { spawned: false, reason: "not_enough_active_players" };
   }
 
@@ -78,6 +121,7 @@ const maybeSpawnTreasure = async (preferredUserId) => {
 
   return {
     spawned: true,
+    reason: "spawned",
     treasure: insertResult.rows[0],
   };
 };
@@ -85,11 +129,15 @@ const maybeSpawnTreasure = async (preferredUserId) => {
 router.post("/location", authMiddleware, async (req, res) => {
   try {
     const { lat, lng } = req.body;
-    const now = Date.now();
+    const now = nowMs();
     const userId = getAuthUserId(req);
 
     if (!userId) {
       return res.status(401).json({ message: "Kullanici kimligi bulunamadi." });
+    }
+
+    if (!tryConsumeUserRateLimit(lastLocationRequestByUser, userId, RATE_LIMIT_LOCATION_MS)) {
+      return res.status(429).json({ message: "Cok hizli istek gonderiyorsun." });
     }
 
     if (!isValidCoordinates(lat, lng)) {
@@ -107,13 +155,6 @@ router.post("/location", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Kullanici bulunamadi." });
     }
 
-    if (user.last_location_at && now - Number(user.last_location_at) < MIN_LOCATION_INTERVAL_MS) {
-      return res.status(429).json({
-        message: "Konum cok sik gonderiliyor.",
-        minIntervalMs: MIN_LOCATION_INTERVAL_MS,
-      });
-    }
-
     if (
       user.lat !== null &&
       user.lng !== null &&
@@ -127,13 +168,29 @@ router.post("/location", authMiddleware, async (req, res) => {
         lng
       );
       const hours = (now - Number(user.last_location_at)) / (1000 * 60 * 60);
-      const speedKmh = meters / 1000 / hours;
+      const deltaMs = now - Number(user.last_location_at);
+      const speedKmh = hours > 0 ? meters / 1000 / hours : 0;
 
-      if (speedKmh > MAX_SPEED_KMH) {
+      if (
+        (deltaMs <= FAST_JUMP_WINDOW_MS && meters > FAST_JUMP_DISTANCE_METERS) ||
+        (deltaMs < LONG_JUMP_WINDOW_MS && meters > LONG_JUMP_DISTANCE_METERS)
+      ) {
+        await logSuspiciousEvent(
+          userId,
+          "impossible_speed",
+          "Imkansiz hiz veya zip tespit edildi, konum reddedildi.",
+          { meters: Number(meters.toFixed(2)), deltaMs, speedKmh: Number(speedKmh.toFixed(2)) }
+        );
         return res.status(400).json({
           message: "Supheli hiz tespit edildi, konum reddedildi.",
+        });
+      }
+
+      if (speedKmh > SUSPICIOUS_SPEED_KMH && meters >= 120) {
+        await logSuspiciousEvent(userId, "impossible_speed", "Yuksek hizli hareket tespit edildi.", {
+          meters: Number(meters.toFixed(2)),
+          deltaMs,
           speedKmh: Number(speedKmh.toFixed(2)),
-          maxSpeedKmh: MAX_SPEED_KMH,
         });
       }
     }
@@ -183,7 +240,7 @@ router.post("/treasure/collect", authMiddleware, async (req, res) => {
   const client = await db.connect();
 
   try {
-    const now = Date.now();
+    const now = nowMs();
     const userId = getAuthUserId(req);
 
     if (!userId) {
@@ -191,14 +248,23 @@ router.post("/treasure/collect", authMiddleware, async (req, res) => {
       return res.status(401).json({ message: "Kullanici kimligi bulunamadi." });
     }
 
+    if (!tryConsumeUserRateLimit(lastCollectRequestByUser, userId, RATE_LIMIT_COLLECT_MS)) {
+      await logSuspiciousEvent(userId, "rate_limit_collect", "Collect endpoint rate limit asildi.");
+      client.release();
+      return res.status(429).json({ message: "Cok hizli istek gonderiyorsun." });
+    }
+
+    await client.query("BEGIN");
+
     const userResult = await client.query(
-      "SELECT id, lat, lng FROM users WHERE id = $1",
+      "SELECT id, lat, lng FROM users WHERE id = $1 FOR UPDATE",
       [userId]
     );
 
     const user = userResult.rows[0];
 
     if (!user || user.lat === null || user.lng === null) {
+      await client.query("ROLLBACK");
       client.release();
       return res.status(400).json({
         message: "Treasure toplamak icin gecerli konum gerekli.",
@@ -216,6 +282,7 @@ router.post("/treasure/collect", authMiddleware, async (req, res) => {
     const treasure = treasureResult.rows[0];
 
     if (!treasure) {
+      await client.query("ROLLBACK");
       client.release();
       return res.status(404).json({ message: "Aktif hazine yok." });
     }
@@ -228,6 +295,12 @@ router.post("/treasure/collect", authMiddleware, async (req, res) => {
     );
 
     if (distance > COLLECT_DISTANCE_METERS) {
+      await logSuspiciousEvent(userId, "collect_too_far", "Oyuncu hazineye uzak collect denedi.", {
+        treasureId: treasure.id,
+        distanceMeters: Number(distance.toFixed(2)),
+        requiredMeters: COLLECT_DISTANCE_METERS,
+      });
+      await client.query("ROLLBACK");
       client.release();
       return res.status(400).json({
         message: "Hazineye yeterince yakin degilsin.",
@@ -235,8 +308,6 @@ router.post("/treasure/collect", authMiddleware, async (req, res) => {
         requiredMeters: COLLECT_DISTANCE_METERS,
       });
     }
-
-    await client.query("BEGIN");
 
     const updateTreasure = await client.query(
       `UPDATE treasures
@@ -246,6 +317,9 @@ router.post("/treasure/collect", authMiddleware, async (req, res) => {
     );
 
     if (updateTreasure.rowCount === 0) {
+      await logSuspiciousEvent(userId, "duplicate_collect", "Ayni hazine ikinci kez collect edilmeye calisildi.", {
+        treasureId: treasure.id,
+      });
       await client.query("ROLLBACK");
       client.release();
       return res.status(409).json({
@@ -253,7 +327,7 @@ router.post("/treasure/collect", authMiddleware, async (req, res) => {
       });
     }
 
-    await client.query(
+    const walletUpdateResult = await client.query(
       `UPDATE users 
        SET wallet_tokens = wallet_tokens + $1 
        WHERE id = $2
@@ -261,16 +335,17 @@ router.post("/treasure/collect", authMiddleware, async (req, res) => {
       [treasure.value, userId]
     );
 
+    if (walletUpdateResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      client.release();
+      return res.status(404).json({ message: "Kullanici bulunamadi." });
+    }
+
     await client.query(
       `INSERT INTO wallet_transactions
        (user_id, treasure_id, amount, type, created_at)
        VALUES ($1, $2, $3, $4, $5)`,
       [userId, treasure.id, treasure.value, "treasure_collect", now]
-    );
-
-    const balanceResult = await client.query(
-      "SELECT wallet_tokens FROM users WHERE id = $1",
-      [userId]
     );
 
     await client.query("COMMIT");
@@ -283,7 +358,7 @@ router.post("/treasure/collect", authMiddleware, async (req, res) => {
       message: "Hazine toplandi!",
       reward: treasure.value,
       treasureType: treasure.type,
-      newBalance: balanceResult.rows[0]?.wallet_tokens ?? null,
+      newBalance: walletUpdateResult.rows[0]?.wallet_tokens ?? null,
       nextTreasure,
     });
   } catch (err) {

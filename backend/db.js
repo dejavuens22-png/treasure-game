@@ -64,6 +64,17 @@ const initDb = async () => {
   `);
 
   await pool.query(`
+    CREATE TABLE IF NOT EXISTS suspicious_events (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id),
+      type TEXT NOT NULL,
+      message TEXT NOT NULL,
+      metadata JSONB DEFAULT '{}'::jsonb,
+      created_at BIGINT NOT NULL
+    );
+  `);
+
+  await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_users_last_active
     ON users(last_active_at);
   `);
@@ -76,6 +87,11 @@ const initDb = async () => {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user_created
     ON wallet_transactions(user_id, created_at DESC);
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_suspicious_events_user_created
+    ON suspicious_events(user_id, created_at DESC);
   `);
 
   console.log("PostgreSQL tablolari hazir.");

@@ -3,6 +3,10 @@ const { db } = require("../db");
 const authMiddleware = require("../middleware/authMiddleware");
 
 const router = express.Router();
+const RATE_LIMIT_BUY_MS = 3000;
+const RATE_LIMIT_SELECT_MS = 1000;
+const buyRateLimitByUser = new Map();
+const selectRateLimitByUser = new Map();
 
 const defaultAvatar = {
   gender: "male",
@@ -18,6 +22,30 @@ const defaultAvatar = {
 };
 
 const getAuthUserId = (req) => req.user?.userId ?? req.user?.id;
+
+const nowMs = () => Date.now();
+
+const tryConsumeUserRateLimit = (store, userId, intervalMs) => {
+  const now = nowMs();
+  const last = store.get(userId) ?? 0;
+  if (now - last < intervalMs) {
+    return false;
+  }
+  store.set(userId, now);
+  return true;
+};
+
+const logSuspiciousEvent = async (userId, type, message, metadata = {}) => {
+  try {
+    await db.query(
+      `INSERT INTO suspicious_events (user_id, type, message, metadata, created_at)
+       VALUES ($1, $2, $3, $4::jsonb, $5)`,
+      [userId ?? null, type, message, JSON.stringify(metadata), nowMs()]
+    );
+  } catch (err) {
+    console.error("[suspicious_events] log error:", err);
+  }
+};
 
 /** slot 1–10 */
 const AVATAR_PRICE_BY_SLOT = {
@@ -53,9 +81,11 @@ function normalizeOwned(raw) {
   return [];
 }
 
-async function getWalletTokens(userId) {
-  const r = await db.query("SELECT wallet_tokens FROM users WHERE id = $1", [userId]);
-  return r.rows[0]?.wallet_tokens ?? 0;
+function ensureStarterAvatars(gender, ownedRaw) {
+  const owned = normalizeOwned(ownedRaw);
+  if (gender !== "male" && gender !== "female") return owned;
+  const starter = [`${gender}_01`, `${gender}_02`, `${gender}_03`];
+  return [...new Set([...starter, ...owned])];
 }
 
 router.get("/avatar", authMiddleware, async (req, res) => {
@@ -151,8 +181,6 @@ router.get("/profile", authMiddleware, async (req, res) => {
 });
 
 router.post("/gender", authMiddleware, async (req, res) => {
-  console.log("BODY:", req.body);
-
   try {
     if (req.body == null || typeof req.body !== "object") {
       return res.status(400).json({
@@ -190,6 +218,10 @@ router.post("/gender", authMiddleware, async (req, res) => {
     const genderAlreadySet =
       egStr !== "" && egStr !== "null" && egStr !== "undefined";
     if (genderAlreadySet) {
+      await logSuspiciousEvent(userId, "gender_change_attempt", "Kullanici ikinci kez gender degistirmeye calisti.", {
+        existingGender: egStr,
+        requestedGender: normalizedGender,
+      });
       return res.status(400).json({ message: "Cinsiyet zaten seçilmiş." });
     }
 
@@ -239,7 +271,7 @@ router.get("/avatars", authMiddleware, async (req, res) => {
     }
 
     const prefix = gender === "female" ? "female" : "male";
-    const owned = new Set(normalizeOwned(row.owned_avatars));
+    const owned = new Set(ensureStarterAvatars(prefix, row.owned_avatars));
     const selected = row.selected_avatar;
 
     const list = [];
@@ -269,9 +301,16 @@ router.post("/avatars/buy", authMiddleware, async (req, res) => {
       return res.status(401).json({ message: "Kullanici kimligi bulunamadi." });
     }
 
+    if (!tryConsumeUserRateLimit(buyRateLimitByUser, userId, RATE_LIMIT_BUY_MS)) {
+      return res.status(429).json({ message: "Cok hizli istek gonderiyorsun." });
+    }
+
     const { avatarId } = req.body;
     const parsed = parseAvatarId(avatarId);
     if (!parsed) {
+      await logSuspiciousEvent(userId, "invalid_avatar_purchase", "Gecersiz avatar satin alma denemesi.", {
+        avatarId,
+      });
       return res.status(400).json({ message: "Gecersiz avatar." });
     }
 
@@ -295,10 +334,14 @@ router.post("/avatars/buy", authMiddleware, async (req, res) => {
 
     if (parsed.gender !== row.gender) {
       await client.query("ROLLBACK");
+      await logSuspiciousEvent(userId, "invalid_avatar_purchase", "Gender uyumsuz avatar satin alma denemesi.", {
+        avatarId,
+        userGender: row.gender,
+      });
       return res.status(400).json({ message: "Avatar cinsiyet ile uyumsuz." });
     }
 
-    const owned = normalizeOwned(row.owned_avatars);
+    const owned = ensureStarterAvatars(row.gender, row.owned_avatars);
     if (owned.includes(avatarId)) {
       await client.query("ROLLBACK");
       return res.json({ message: "Zaten satin alindi.", avatarId, owned_avatars: owned });
@@ -323,12 +366,17 @@ router.post("/avatars/buy", authMiddleware, async (req, res) => {
     const balance = row.wallet_tokens ?? 0;
     if (balance < price) {
       await client.query("ROLLBACK");
+      await logSuspiciousEvent(userId, "insufficient_tokens_purchase", "Yetersiz token ile satin alma denemesi.", {
+        avatarId,
+        price,
+        balance,
+      });
       return res.status(400).json({ message: "Yeterli token yok." });
     }
 
     const newBalance = balance - price;
     const nextOwned = [...new Set([...owned, avatarId])];
-    const now = Date.now();
+    const now = nowMs();
 
     await client.query(
       `UPDATE users
@@ -367,6 +415,10 @@ router.post("/avatars/select", authMiddleware, async (req, res) => {
       return res.status(401).json({ message: "Kullanici kimligi bulunamadi." });
     }
 
+    if (!tryConsumeUserRateLimit(selectRateLimitByUser, userId, RATE_LIMIT_SELECT_MS)) {
+      return res.status(429).json({ message: "Cok hizli istek gonderiyorsun." });
+    }
+
     const { avatarId } = req.body;
     const parsed = parseAvatarId(avatarId);
     if (!parsed) {
@@ -386,7 +438,7 @@ router.post("/avatars/select", authMiddleware, async (req, res) => {
       return res.status(400).json({ message: "Avatar cinsiyet ile uyumsuz." });
     }
 
-    const owned = normalizeOwned(row.owned_avatars);
+    const owned = ensureStarterAvatars(row.gender, row.owned_avatars);
     if (!owned.includes(avatarId)) {
       return res.status(400).json({ message: "Bu avatar sahip olunanlar arasinda degil." });
     }
