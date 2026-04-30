@@ -151,15 +151,29 @@ router.get("/profile", authMiddleware, async (req, res) => {
 });
 
 router.post("/gender", authMiddleware, async (req, res) => {
+  console.log("BODY:", req.body);
+
   try {
+    if (req.body == null || typeof req.body !== "object") {
+      return res.status(400).json({
+        message: "Gecersiz istek govdesi. Content-Type: application/json bekleniyor.",
+      });
+    }
+
     const userId = getAuthUserId(req);
     if (!userId) {
       return res.status(401).json({ message: "Kullanici kimligi bulunamadi." });
     }
 
     const { gender } = req.body;
-    if (gender !== "male" && gender !== "female") {
-      return res.status(400).json({ message: "Gecersiz cinsiyet." });
+
+    if (typeof gender !== "string") {
+      return res.status(400).json({ message: "Gecersiz gender." });
+    }
+
+    const normalizedGender = gender.trim();
+    if (normalizedGender !== "male" && normalizedGender !== "female") {
+      return res.status(400).json({ message: "Gecersiz gender." });
     }
 
     const cur = await db.query(
@@ -173,12 +187,13 @@ router.post("/gender", authMiddleware, async (req, res) => {
 
     const eg = existing.gender;
     const egStr = eg == null ? "" : String(eg).trim();
-    const genderAlreadySet = egStr !== "" && egStr !== "null" && egStr !== "undefined";
+    const genderAlreadySet =
+      egStr !== "" && egStr !== "null" && egStr !== "undefined";
     if (genderAlreadySet) {
       return res.status(400).json({ message: "Cinsiyet zaten seçilmiş." });
     }
 
-    const prefix = gender;
+    const prefix = normalizedGender;
     const starter = [`${prefix}_01`, `${prefix}_02`, `${prefix}_03`];
 
     await db.query(
@@ -187,18 +202,18 @@ router.post("/gender", authMiddleware, async (req, res) => {
            owned_avatars = $2::jsonb,
            selected_avatar = $3
        WHERE id = $4`,
-      [gender, JSON.stringify(starter), `${prefix}_01`, userId]
+      [normalizedGender, JSON.stringify(starter), `${prefix}_01`, userId]
     );
 
-    return res.json({
+    return res.status(200).json({
       message: "Cinsiyet kaydedildi.",
-      gender,
+      gender: normalizedGender,
       owned_avatars: starter,
       selected_avatar: `${prefix}_01`,
     });
   } catch (err) {
-    console.error("[POST /user/gender] error:", err);
-    return res.status(500).json({ message: "Cinsiyet kaydedilemedi." });
+    console.error("GENDER ERROR:", err);
+    return res.status(500).json({ message: "Server error" });
   }
 });
 
