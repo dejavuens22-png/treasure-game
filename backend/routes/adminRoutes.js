@@ -69,7 +69,10 @@ const nav = (current) => {
         )
         .join("")}
     </div>
-    <form method="post" action="/admin/logout"><button class="btn danger">Cikis Yap</button></form>
+    <div class="topActions">
+      ${current !== "/admin" ? `<a class="btn neutral" href="/admin">Ana Panele Don</a>` : ""}
+      <form method="post" action="/admin/logout"><button class="btn danger">Cikis Yap</button></form>
+    </div>
   </div>`;
 };
 
@@ -85,30 +88,48 @@ const page = (title, current, content, flash = {}) => `<!doctype html>
     .topbar { display:flex; gap:12px; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; }
     .brand { font-weight:800; font-size:22px; color:#e2e8f0; }
     .navlinks { display:flex; gap:8px; flex-wrap:wrap; }
-    .navlink { color:#7dd3fc; border:1px solid #334155; padding:8px 10px; border-radius:9px; text-decoration:none; background:#111827; }
+    .topActions { display:flex; align-items:center; gap:8px; margin-left:auto; }
+    .navlink { color:#7dd3fc; border:1px solid #334155; padding:7px 10px; border-radius:9px; text-decoration:none; background:#111827; transition:all .16s ease; }
+    .navlink:hover { border-color:#475569; background:#1a2437; transform:translateY(-1px); }
     .navlink.active { background:#1d4ed8; color:#dbeafe; border-color:#3b82f6; }
     .card { background:#111827; border:1px solid #334155; border-radius:12px; padding:16px; margin-bottom:14px; }
     .card h1, .card h2, .card h3, .card p { margin:0 0 10px; }
     .muted { color:#94a3b8; font-size:13px; }
     .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .rowEnd { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:flex-end; }
     .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap:10px; }
     .menuGrid { display:grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
-    .menuCard { display:block; border:1px solid #334155; border-radius:12px; background:#0b1220; color:#e2e8f0; text-decoration:none; padding:14px; }
+    .menuCard { display:block; border:1px solid #334155; border-radius:12px; background:#0b1220; color:#e2e8f0; text-decoration:none; padding:14px; transition:all .18s ease; }
+    .menuCard:hover { transform:translateY(-3px); border-color:#475569; box-shadow:0 8px 16px rgba(2,6,23,.24); }
     .menuCard strong { display:block; margin-bottom:6px; }
     table { width:100%; border-collapse:collapse; font-size:13px; }
     th, td { border:1px solid #334155; padding:7px; text-align:left; vertical-align:top; }
     th { background:#1f2937; }
     input, select, textarea, button { background:#1e293b; color:#e2e8f0; border:1px solid #334155; border-radius:8px; padding:8px; }
     button { cursor:pointer; }
-    .btn { padding:8px 12px; }
+    .btn {
+      display:inline-flex; align-items:center; justify-content:center;
+      height:34px; padding:0 12px; border-radius:8px; border:1px solid #334155;
+      text-decoration:none; white-space:nowrap; font-size:12px; font-weight:700;
+      transition:all .16s ease;
+    }
+    .btn:hover { transform:translateY(-1px); filter:brightness(1.08); }
     .good { background:#14532d; border-color:#166534; }
     .danger { background:#7f1d1d; border-color:#991b1b; }
     .warn { background:#78350f; border-color:#92400e; }
+    .neutral { background:#1d4ed8; border-color:#2563eb; color:#dbeafe; }
     .flash { margin-bottom:10px; padding:10px; border-radius:8px; border:1px solid; }
     .flash.ok { background:#14532d; border-color:#166534; color:#bbf7d0; }
     .flash.err { background:#7f1d1d; border-color:#991b1b; color:#fecaca; }
     .flash.warn { background:#78350f; border-color:#92400e; color:#fde68a; }
     pre { white-space:pre-wrap; word-break:break-word; margin:0; }
+    .tableActions { display:flex; align-items:center; gap:8px; flex-wrap:nowrap; }
+    .tableActions form { margin:0; }
+    .tableActions .btn { height:30px; font-size:11px; padding:0 10px; }
+    @media (max-width: 980px) {
+      .tableActions { flex-wrap:wrap; }
+      .topActions { width:100%; justify-content:flex-end; }
+    }
   </style>
 </head>
 <body>
@@ -311,15 +332,18 @@ router.get("/", requireAdminSession, async (req, res) => {
       .map(([k, v]) => `<div class="card"><div class="muted">${esc(k)}</div><h2>${esc(v)}</h2></div>`)
       .join("");
     const menu = [
-      ["/admin/users", "Kayitli Oyuncular", "Oyuncu listesi, detay ve arama"],
-      ["/admin/tokens", "Token Yonetimi", "Token ekleme/silme islemleri"],
-      ["/admin/bans", "Ban Yonetimi", "Banli oyuncular ve ban islemleri"],
-      ["/admin/suspicious", "Supheli Hareketler", "Supheli olaylari filtrele ve incele"],
-      ["/admin/treasures", "Hazine Yonetimi", "Aktif hazine ve manuel olusturma"],
-      ["/admin/avatars", "Avatar Ekonomisi", "Avatar fiyat tablosu"],
-      ["/admin/logs", "Admin Islem Kayitlari", "Admin aksiyon gecmisi"],
+      ["/admin/users", "Kayıtlı Oyuncular", "Oyuncu listesi, detay ve arama", "👥"],
+      ["/admin/tokens", "Token Yönetimi", "Token ekleme/silme islemleri", "🪙"],
+      ["/admin/bans", "Ban Yönetimi", "Banli oyuncular ve ban islemleri", "⛔"],
+      ["/admin/suspicious", "Şüpheli Hareketler", "Supheli olaylari filtrele ve incele", "⚠️"],
+      ["/admin/treasures", "Hazine Yönetimi", "Aktif hazine ve manuel olusturma", "💰"],
+      ["/admin/avatars", "Avatar Ekonomisi", "Avatar fiyat tablosu", "🧩"],
+      ["/admin/logs", "Admin İşlem Kayıtları", "Admin aksiyon gecmisi", "🧾"],
     ]
-      .map(([href, title, desc]) => `<a class="menuCard" href="${href}"><strong>${esc(title)}</strong><span class="muted">${esc(desc)}</span></a>`)
+      .map(
+        ([href, title, desc, icon]) =>
+          `<a class="menuCard" href="${href}"><strong>${esc(icon)} ${esc(title)}</strong><span class="muted">${esc(desc)}</span></a>`
+      )
       .join("");
     const content = `
       <div class="card"><h1>Ana Panel</h1><p>Genel ozet ve yonetim menuleri.</p></div>
@@ -357,12 +381,12 @@ router.get("/users", requireAdminSession, async (req, res) => {
           <td>${u.id}</td><td>${esc(u.username)}</td><td>${u.wallet_tokens}</td><td>${esc(u.gender)}</td>
           <td>${esc(u.selected_avatar)}</td><td>${toOwnedCount(u.owned_avatars)}</td><td>${u.is_banned ? "Banli" : "Aktif"}</td>
           <td>${fmtTime(u.last_login_at)}</td><td>${fmtTime(u.last_logout_at)}</td><td>${fmtTime(u.created_at)}</td>
-          <td class="row">
-            <a class="navlink" href="/admin/users/${u.id}">Detay Gor</a>
-            <a class="navlink" href="/admin/tokens?user_id=${u.id}">Token Duzenle</a>
+          <td class="tableActions">
+            <a class="btn neutral" href="/admin/users/${u.id}">Detay Gor</a>
+            <a class="btn neutral" href="/admin/tokens?user_id=${u.id}">Token Duzenle</a>
             ${
               u.is_banned
-                ? `<form method="post" action="/admin/users/${u.id}/unban"><input type="hidden" name="redirectTo" value="/admin/users" /><button class="btn">Bani Kaldir</button></form>`
+                ? `<form method="post" action="/admin/users/${u.id}/unban"><input type="hidden" name="redirectTo" value="/admin/users" /><button class="btn good">Bani Kaldir</button></form>`
                 : `<form method="post" action="/admin/users/${u.id}/ban"><input type="hidden" name="redirectTo" value="/admin/users" /><button class="btn danger">Banla</button></form>`
             }
           </td>
@@ -375,8 +399,8 @@ router.get("/users", requireAdminSession, async (req, res) => {
         <form method="get" action="/admin/users" class="row">
           <input name="q" placeholder="Kullanici adina gore ara" value="${esc(q)}" />
           <input name="id" type="number" placeholder="ID ile ara" value="${esc(req.query.id || "")}" />
-          <button class="btn">Ara</button>
-          <a class="navlink" href="/admin/users">Temizle</a>
+          <button class="btn neutral">Ara</button>
+          <a class="btn neutral" href="/admin/users">Temizle</a>
         </form>
       </div>
       <div class="card"><table><thead><tr>
@@ -424,15 +448,15 @@ router.get("/users/:id", requireAdminSession, async (req, res) => {
         <div><strong>Son Cikis:</strong> ${fmtTime(user.last_logout_at)}</div>
         <div><strong>Kayit Tarihi:</strong> ${fmtTime(user.created_at)}</div>
       </div><div style="margin-top:10px;"><strong>Owned Avatars</strong><pre>${esc(JSON.stringify(user.owned_avatars || [], null, 2))}</pre></div></div>
-      <div class="card"><div class="row">
-        <a class="navlink" href="/admin/tokens?user_id=${user.id}&mode=add">Token Ekle</a>
-        <a class="navlink" href="/admin/tokens?user_id=${user.id}&mode=remove">Token Sil</a>
+      <div class="card"><div class="rowEnd">
+        <a class="btn good" href="/admin/tokens?user_id=${user.id}&mode=add">Token Ekle</a>
+        <a class="btn warn" href="/admin/tokens?user_id=${user.id}&mode=remove">Token Sil</a>
         ${
           user.is_banned
-            ? `<form method="post" action="/admin/users/${user.id}/unban"><input type="hidden" name="redirectTo" value="/admin/users/${user.id}" /><button class="btn">Bani Kaldir</button></form>`
+            ? `<form method="post" action="/admin/users/${user.id}/unban"><input type="hidden" name="redirectTo" value="/admin/users/${user.id}" /><button class="btn good">Bani Kaldir</button></form>`
             : `<form method="post" action="/admin/users/${user.id}/ban"><input type="hidden" name="redirectTo" value="/admin/users/${user.id}" /><button class="btn danger">Banla</button></form>`
         }
-        <a class="navlink" href="/admin/users">Geri Don</a>
+        <a class="btn neutral" href="/admin/users">Geri Don</a>
       </div></div>
       <div class="card"><h3>Supheli Hareketler</h3><table><thead><tr><th>ID</th><th>Tip</th><th>Mesaj</th><th>Metadata</th><th>Tarih</th></tr></thead><tbody>${suspiciousRows || "<tr><td colspan='5'>Kayit yok.</td></tr>"}</tbody></table></div>
       <div class="card"><h3>Son 20 Wallet Islemi</h3><table><thead><tr><th>ID</th><th>Miktar</th><th>Tip</th><th>Treasure ID</th><th>Tarih</th></tr></thead><tbody>${txRows || "<tr><td colspan='5'>Islem yok.</td></tr>"}</tbody></table></div>`;
@@ -548,8 +572,8 @@ router.get("/suspicious", requireAdminSession, async (req, res) => {
             <option value="24h" ${period === "24h" ? "selected" : ""}>Son 24 saat</option>
             <option value="7d" ${period === "7d" ? "selected" : ""}>Son 7 gun</option>
           </select>
-          <button class="btn">Filtrele</button>
-          <a class="navlink" href="/admin/suspicious">Temizle</a>
+          <button class="btn neutral">Filtrele</button>
+          <a class="btn neutral" href="/admin/suspicious">Temizle</a>
         </form>
       </div>
       <div class="card"><table><thead><tr><th>ID</th><th>Kullanici ID</th><th>Kullanici Adi</th><th>Tip</th><th>Mesaj</th><th>Metadata</th><th>Tarih</th></tr></thead><tbody>${rows || "<tr><td colspan='7'>Kayit yok.</td></tr>"}</tbody></table></div>`;
