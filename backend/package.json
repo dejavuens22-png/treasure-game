@@ -4,7 +4,8 @@
   "description": "Treasure hunting game backend with Express, sqlite3 and JWT",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/admin-token-security.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -13,6 +14,8 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.20.0",
+    "qrcode": "^1.5.4",
+    "speakeasy": "^2.0.0",
     "sqlite3": "^5.1.7"
   }
 }

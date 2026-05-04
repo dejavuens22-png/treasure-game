@@ -99,6 +99,22 @@ const initDb = async () => {
       created_at BIGINT NOT NULL
     );
   `);
+  await pool.query(`
+    ALTER TABLE admin_users
+    ADD COLUMN IF NOT EXISTS totp_secret TEXT
+  `);
+  await pool.query(`
+    ALTER TABLE admin_users
+    ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT false
+  `);
+  await pool.query(`
+    ALTER TABLE admin_users
+    ADD COLUMN IF NOT EXISTS totp_locked_until BIGINT
+  `);
+  await pool.query(`
+    ALTER TABLE admin_users
+    ADD COLUMN IF NOT EXISTS totp_fail_count INTEGER NOT NULL DEFAULT 0
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS admin_sessions (
@@ -147,6 +163,57 @@ const initDb = async () => {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_admin_logs_created
     ON admin_logs(created_at DESC);
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS token_adjustment_requests (
+      id SERIAL PRIMARY KEY,
+      target_user_id INTEGER NOT NULL REFERENCES users(id),
+      admin_id INTEGER NOT NULL REFERENCES admin_users(id),
+      amount INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      verification_code_hash TEXT NOT NULL,
+      signed_payload TEXT NOT NULL,
+      ip_address TEXT,
+      created_at BIGINT NOT NULL,
+      approved_at BIGINT,
+      rejected_at BIGINT
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_token_adjustment_requests_status_created
+    ON token_adjustment_requests(status, created_at DESC);
+  `);
+  await pool.query(`
+    ALTER TABLE wallet_transactions
+    ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_setup_pending (
+      token TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      totp_secret TEXT NOT NULL,
+      created_at BIGINT NOT NULL,
+      expires_at BIGINT NOT NULL
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admin_2fa_pending (
+      token TEXT PRIMARY KEY,
+      admin_id INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      enroll_totp_secret TEXT,
+      created_at BIGINT NOT NULL,
+      expires_at BIGINT NOT NULL
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_admin_2fa_pending_admin
+    ON admin_2fa_pending(admin_id);
   `);
 
   console.log("PostgreSQL tablolari hazir.");

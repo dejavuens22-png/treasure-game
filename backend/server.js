@@ -1,4 +1,15 @@
 require("dotenv").config();
+
+if (process.env.NODE_ENV === "production") {
+  const sig = process.env.TOKEN_SIGNING_SECRET;
+  if (sig == null || String(sig).trim() === "") {
+    console.error(
+      "[FATAL] Production ortami: TOKEN_SIGNING_SECRET ortam degiskeni zorunlu. Render veya hosting panelinde uzun bir sifre degeri ekleyip yeniden deploy edin."
+    );
+    process.exit(1);
+  }
+}
+
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const { initDb } = require("./db");
